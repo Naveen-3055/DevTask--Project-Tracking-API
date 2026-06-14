@@ -7,7 +7,7 @@ const errorHandler = require('./middlewares/errorHandler');
 
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/user.routes');
-
+const orgRoutes = require('./routes/organization.routes');
 
 const app = express();
 
@@ -21,7 +21,7 @@ app.use(cookieParser());
 // routes
 app.use('/api/v1/auth',authRoutes);
 app.use('/api/v1/user',userRoutes);
-
+app.use('/api/v1/organizations', orgRoutes);
 
 // healthy check
 app.get("/health", (req,res)=> {

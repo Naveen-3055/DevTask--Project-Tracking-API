@@ -83,7 +83,7 @@ const refreshToken = async (token) => {
         throw new Error('Refresh token is required');
     }
 
-    // 1. verift token signature
+    // 1. verify token signature
     const decoded = verifyRefreshToken(token);
 
     // 2 check token exists in database and not expired.
