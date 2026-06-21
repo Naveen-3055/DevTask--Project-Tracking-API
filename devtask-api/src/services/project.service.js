@@ -42,11 +42,12 @@ const getProjects = async ({organizationId, userId}) => {
         `SELECT
            p.id,p.name,p.description, p.status,p.created_at,
            u.name AS created_by_name,
-           0 AS task_count
+        COUNT(DISTINCT t.id) AS task_count
         FROM projects p
         JOIN users u ON u.id = p.created_by
+        LEFT JOIN tasks t ON t.project_id = p.id
         WHERE p.organization_id = $1
-        ORDER BY p.created_at DESC `,
+        GROUP BY p.id, u.name `,
         [organizationId]
     )
     return result.rows;

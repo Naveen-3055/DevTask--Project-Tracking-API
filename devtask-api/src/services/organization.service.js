@@ -42,7 +42,7 @@ const createOrganization = async ({name,userId}) => {
         await client.query('ROLLBACK');
         throw error;
     }finally{
-        client.release(); // release the client back to the pool
+       client.release(); // release the client back to the pool
     }
 
 }
