@@ -1,4 +1,8 @@
-const pool = require('../config/db')
+const pool = require('../config/db');
+const { emailQueue } = require('../config/queue');
+const { deleteCacheByPattern, getCache, setCache } = require('../utils/cache');
+
+// const {emailQueue} = 
 
 //Helper - verify user is org member
 const checkOrgMemberShip = async (organizationId, userId) => {
@@ -85,6 +89,34 @@ const createTask = async ({title, description, projectId, organizationId,assigne
         });
         
         await client.query('COMMIT');
+
+        // Invalidate project tasks cache
+        await deleteCacheByPattern(`tasks:${projectId}`);
+
+        // queue email if task is assigned to someone
+        if(assignedTo && assignedTo !== userId){
+            const assigneeResult = await pool.query(
+                'SELECT name FROM users WHERE id = $1',[userId]
+            );
+            const assignerResult = await pool.query(
+                 'SELECT name FROM users WHERE id = $1',
+                [userId]
+            );
+            const projectResult = await pool.query(
+                'SELECT name FROM projects WHERE id=$1',[projectId]
+            );
+
+            if(assigneeResult.rows.length > 0){
+                await emailQueue.add('task-assigned', {
+                    toEmail : assigneeResult.rows[0].email,
+                    toName: assigneeResult.rows[0].name,
+                    taskTitle: title,
+                    projectName: projectResult.rows[0].name,
+                    assignedByName: assignerResult.rows[0].name,
+                })
+            }
+        }
+
         return task;
     } catch (error) {
         await client.query('ROLLBACK');
@@ -98,6 +130,16 @@ const createTask = async ({title, description, projectId, organizationId,assigne
 const getTasks = async ({projectId, organizationId, userId, status, priority, assignedTo, page=1, limit=10}) => {
     // 1. check memberShip
     await checkOrgMemberShip(organizationId, userId);
+
+    // Build cache key from all filter params
+    const cacheKey = `tasks:${projectId}:${status || 'all'}:${priority || 'all'}.${page}:${limit}`;
+
+    // try cache first
+    const cached = await getCache(cacheKey);
+    if(cached){
+        console.log('Cache hit: ', cacheKey);
+        return cached;
+    }
 
     //2. build dynamic query with filters
     const conditions = ['t.project_id = $1', 't.organization_id = $2'];
@@ -155,7 +197,7 @@ const getTasks = async ({projectId, organizationId, userId, status, priority, as
         [...values,limit,offset]
     );
 
-    return {
+   const result = {
         tasks: result.rows,
         pagination : {
             total,
@@ -164,6 +206,9 @@ const getTasks = async ({projectId, organizationId, userId, status, priority, as
             totalPage: Math.ceil(total/limit)
         }
     };
+
+    await setCache(cacheKey, result);
+    return result;
 }
 
 //get single task by Id
@@ -188,6 +233,7 @@ const getTaskById = async ({taskId, userId}) => {
 
     // verify user is a memeber of the org this task belongs to
     await checkOrgMemberShip(task.organization_id, userId);
+
     return task;
 }
 
@@ -240,6 +286,33 @@ const updateTask = async ({taskId,userId,title,description,status,priority,assig
      }
 
      await client.query('COMMIT');
+
+     await deleteCacheByPattern(`tasks:${existing.project_id}:*`);
+
+     if(assignedTo && assignedTo !== existing.assigned_to && assignedTo !== userId){
+        const assigneeResult = await pool.query(
+            'SELECT name, email FROM users WHERE id = $1',
+             [assignedTo]
+         );
+         const assignerResult = await pool.query(
+            'SELECT name FROM users WHERE id = $1',
+            [userId]
+        );
+        const projectResult = await pool.query(
+            'SELECT name FROM projects WHERE id = $1',
+        [existing.project_id]
+        );
+
+        if(assigneeResult.rows.length > 0){
+            await emailQueue.add('task-assigned', {
+                toEmail: assigneeResult.rows[0].email,
+                toName: assigneeResult.rows[0].name,
+                taskTitle: existing.title,
+                projectName: projectResult.rows[0].name,
+                assignedByName: assignerResult.rows[0].name,
+            });
+        }
+     }
      return result.rows[0];
     } catch (error) {
         await client.query('ROLLBACK');
